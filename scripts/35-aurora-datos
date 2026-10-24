@@ -1,0 +1,108 @@
+#!/bin/sh
+# Precalcula en el arranque lo que Aurora necesita para pintarse, y lo deja
+# DENTRO de la carpeta de cada variante:
+#
+#   datos.js    un <script> que define window.AURORA_RAW con las respuestas
+#               del bus ya listas. La app no espera a ningun luna-send para
+#               el primer pintado: lee un archivo local.
+#   iconos/     los iconos de cada app copiados como <id>.png, para poder
+#               referenciarlos por ruta relativa. Antes viajaban en base64
+#               por el puente luna y se guardaban en localStorage, lo que
+#               ocupa memoria del JavaScript.
+#
+# Se escribe un .js y no un .json a proposito: una etiqueta <script> funciona
+# siempre en file://, mientras que fetch() sobre file:// lo bloquea Chrome.
+#
+# REVERTIR: borrar este archivo y reiniciar.
+
+LOG=/var/lib/webosbrew/aurora-datos.log
+APPS=/media/developer/apps/usr/palm/applications
+CONF=/media/internal/aurora.json
+exec >>"$LOG" 2>&1 </dev/null
+echo "=== $(date) ==="
+
+# Esperar a que el bus responda: en el arranque tarda.
+i=0
+while [ $i -lt 30 ]; do
+    luna-send -n 1 -f luna://com.webos.applicationManager/listApps '{}' </dev/null >/dev/null 2>&1 && break
+    i=$((i+1)); sleep 2
+done
+
+TMP=/tmp/aurora-datos.js
+# Las respuestas de luna-send ya son JSON valido: se concatenan tal cual,
+# sin parsear nada en shell.
+{
+    printf 'window.AURORA_RAW = {\n"generado":"%s",\n"apps":' "$(date '+%Y-%m-%d %H:%M:%S')"
+    luna-send -n 1 -f luna://com.webos.applicationManager/listApps '{}' </dev/null 2>/dev/null
+    printf ',\n"entradas":'
+    luna-send -n 1 -f luna://com.webos.service.eim/getAllInputStatus '{}' </dev/null 2>/dev/null
+    printf ',\n"red":'
+    luna-send -n 1 -f luna://com.webos.service.connectionmanager/getStatus '{}' </dev/null 2>/dev/null
+    printf ',\n"conf":'
+    cat "$CONF" 2>/dev/null || echo '{}'
+    printf '\n};\n'
+} > "$TMP"
+
+# Sanidad: si alguna consulta fallo, el archivo quedaria corto o incompleto.
+if [ "$(wc -c < "$TMP")" -lt 400 ] || ! grep -q '^};' "$TMP"; then
+    echo "ABORTADO: datos.js incompleto ($(wc -c < "$TMP") bytes)"
+    rm -f "$TMP"
+    exit 0
+fi
+
+for destino in "$APPS/tv.aurora.home" "$APPS/tv.aurora.bar"; do
+    [ -d "$destino" ] || continue
+    cp "$TMP" "$destino/datos.js"
+    mkdir -p "$destino/iconos"
+
+    # Iconos: el nombre del archivo lo dice el appinfo.json de cada app, no
+    # siempre es icon.png (YouTube usa yt_lg_130x130.png, por ejemplo).
+    n=0
+    for d in /usr/palm/applications/*/ /media/cryptofs/apps/usr/palm/applications/*/ "$APPS"/*/; do
+        [ -f "$d/appinfo.json" ] || continue
+        id=$(basename "$d")
+        case "$id" in tv.aurora.*) continue ;; esac
+        ico=$(sed -n 's/.*"largeIcon"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$d/appinfo.json" | head -1)
+        [ -n "$ico" ] || ico=$(sed -n 's/.*"icon"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$d/appinfo.json" | head -1)
+        [ -n "$ico" ] || continue
+        case "$ico" in /*) ruta="$ico" ;; *) ruta="$d$ico" ;; esac
+        [ -f "$ruta" ] || continue
+        # Saltar imagenes grandes: no aportan a 248x140 y ocupan disco.
+        [ "$(wc -c < "$ruta")" -gt 204800 ] && continue
+        cp "$ruta" "$destino/iconos/$id.png" 2>/dev/null && n=$((n+1))
+    done
+    echo "$destino: datos.js ($(wc -c < "$destino/datos.js") bytes) y $n iconos"
+done
+
+# ---------------------------------------------------------------- arte ancho
+# Solo para la variante de pantalla completa: la barra no lo usa.
+# Son imagenes de varios MB, asi que se copian UNA vez: si ya esta y pesa lo
+# mismo, se salta. De lo contrario cada arranque costaria segundos.
+ARTE="$APPS/tv.aurora.home/arte"
+if [ -d "$APPS/tv.aurora.home" ]; then
+    mkdir -p "$ARTE"
+    nuevos=0; saltados=0
+    for d in /usr/palm/applications/*/ /media/cryptofs/apps/usr/palm/applications/*/ \
+             "$APPS"/*/; do
+        [ -f "$d/appinfo.json" ] || continue
+        id=$(basename "$d")
+        case "$id" in tv.aurora.*) continue ;; esac
+        img=$(sed -n 's/.*"bgImage"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$d/appinfo.json" | head -1)
+        [ -n "$img" ] || continue
+        case "$img" in /*) ruta="$img" ;; *) ruta="$d$img" ;; esac
+        [ -f "$ruta" ] || continue
+        tam=$(wc -c < "$ruta")
+        # Por encima de 6 MB no compensa: decodificarla costaria demasiada RAM.
+        [ "$tam" -gt 6291456 ] && continue
+        # Por debajo de 60 KB a 1920x1080 no hay imagen: son rellenos planos
+        # (el de YouTube pesa 18 KB y es un rectangulo casi negro). Mejor no
+        # mostrar panel y dejar que mande el degradado.
+        [ "$tam" -lt 61440 ] && { rm -f "$ARTE/$id.png"; continue; }
+        if [ -f "$ARTE/$id.png" ] && [ "$(wc -c < "$ARTE/$id.png")" = "$tam" ]; then
+            saltados=$((saltados+1)); continue
+        fi
+        cp "$ruta" "$ARTE/$id.png" 2>/dev/null && nuevos=$((nuevos+1))
+    done
+    echo "arte ancho: $nuevos copiados, $saltados ya estaban ($(du -sk "$ARTE" 2>/dev/null | cut -f1) KB)"
+fi
+rm -f "$TMP"

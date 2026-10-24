@@ -1,0 +1,36 @@
+#!/bin/sh
+# Libera RAM en el arranque: desactiva la precarga de apps de LG y detiene
+# AirPlay/HomeKit. REVERTIR: borrar este archivo y reiniciar.
+
+PATCH=/var/lib/webosbrew/preloadmanager-disabled.json
+LOG=/var/lib/webosbrew/liberar-ram.log
+exec >>"$LOG" 2>&1 </dev/null
+echo "=== $(date) ==="
+
+# /etc es de solo lectura: se monta nuestra copia encima.
+if [ -f "$PATCH" ]; then
+    for f in /etc/configd/layers/base/com.webos.service.preloadmanager.json \
+             /etc/configd/layers/distro/*/com.webos.service.preloadmanager.json; do
+        [ -f "$f" ] && mount -o bind "$PATCH" "$f" && echo "montado: $f"
+    done
+fi
+
+apagar_extras() {
+    stop airplay-adaptor >/dev/null 2>&1 && echo "airplay-adaptor detenido"
+    # homekit lo lanza ls-hubd bajo demanda: 'stop' no basta.
+    hk=$(pgrep -x homekit)
+    [ -n "$hk" ] && kill -9 $hk 2>/dev/null && echo "homekit detenido (pid $hk)"
+}
+apagar_extras
+
+# El arranque sigue levantando cosas despues de este punto.
+(
+    sleep 90
+    apagar_extras
+    for app in netflix com.webos.app.browser youtube.leanback.v4 \
+               com.webos.app.tips amazon vudu pooq; do
+        luna-send -n 1 -f luna://com.webos.applicationManager/closeByAppId \
+            "{\"id\":\"$app\"}" </dev/null >/dev/null 2>&1
+    done
+    echo "limpieza diferida: $(free -m | awk '/Mem:/{print $7}') MB disponibles"
+) &

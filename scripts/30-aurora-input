@@ -1,0 +1,33 @@
+#!/bin/sh
+# Registra Aurora como entrada de TV en cada arranque.
+# Hace falta que appinfo.json declare "supportGIP": true; sin eso addDevice
+# devuelve returnValue true pero la entrada no aparece en la lista.
+# REVERTIR: borrar este archivo (y quitar la entrada desde el televisor).
+
+APP=/media/developer/apps/usr/palm/applications/tv.aurora.home
+LOG=/var/lib/webosbrew/aurora-input.log
+exec >>"$LOG" 2>&1 </dev/null
+echo "=== $(date) ==="
+
+[ -f "$APP/appinfo.json" ] || { echo "ABORTADO: Aurora no esta instalada"; exit 0; }
+
+# El bus tarda en estar listo durante el arranque.
+i=0
+while [ $i -lt 30 ]; do
+    luna-send -n 1 -f luna://com.webos.service.eim/getAllInputStatus '{}' </dev/null >/dev/null 2>&1 && break
+    i=$((i+1)); sleep 2
+done
+
+luna-send -n 1 -f luna://com.webos.service.eim/addDevice "{
+  \"id\": \"MVPD_IP-tv.aurora.home\",
+  \"appId\": \"tv.aurora.home\",
+  \"label\": \"Aurora\",
+  \"description\": \"Aurora home screen\",
+  \"port\": 1,
+  \"activate\": true,
+  \"icon\": \"$APP/icon.png\",
+  \"largeIcon\": \"$APP/largeIcon.png\",
+  \"mvpdIcon\": \"$APP/icon.png\",
+  \"pigImage\": \"$APP/\"
+}" </dev/null 2>&1 | tr -d '\n'
+echo

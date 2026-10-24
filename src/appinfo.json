@@ -1,0 +1,18 @@
+{
+  "id": "tv.aurora.home",
+  "version": "0.1.0",
+  "vendor": "aurora",
+  "type": "web",
+  "main": "index.html",
+  "title": "Aurora",
+  "appDescription": "Aurora: a home screen for rooted 2018 LG TVs.",
+  "icon": "icon.png",
+  "largeIcon": "largeIcon.png",
+  "iconColor": "#1a0608",
+  "bgColor": "#000000",
+  "resolution": "1920x1080",
+  "disableBackHistoryAPI": true,
+  "transparent": false,
+  "requiredMemory": 20,
+  "supportGIP": true
+}

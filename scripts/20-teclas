@@ -1,0 +1,52 @@
+#!/bin/sh
+# Parches de teclado del compositor, montados sobre /usr (solo lectura):
+#   appLaunch.js  -> botones Netflix y Amazon del mando
+#   systemUi.js   -> boton HOME abre Aurora en vez de la barra de LG
+#
+# El boton HOME no se puede interceptar desde una app: en webOS 4 la barra de
+# LG es una capa del compositor, no una app que pase a primer plano, asi que
+# getForegroundAppInfo nunca la reporta. Hay que tocar la tecla en origen.
+#
+# surface-manager arranca a los ~2s y lee estos archivos entonces; este script
+# no corre hasta los ~44s, asi que tras montar hay que reiniciarlo.
+#
+# REVERTIR: borrar este archivo y reiniciar el televisor.
+
+LOG=/var/lib/webosbrew/teclas.log
+exec >>"$LOG" 2>&1 </dev/null
+echo "=== $(date) ==="
+
+PARCHES="/var/lib/webosbrew/appLaunch-patched.js|/usr/lib/qt5/qml/KeyFilters/appLaunch.js
+/var/lib/webosbrew/systemUi-patched.js|/usr/lib/qt5/qml/KeyFilters/systemUi.js"
+
+montados=0
+echo "$PARCHES" | while IFS='|' read -r parche destino; do
+    [ -n "$parche" ] || continue
+    [ -f "$parche" ] || { echo "sin parche: $parche"; continue; }
+    # Si una actualizacion de LG cambia el original, no montar a ciegas.
+    if [ "$(wc -l < "$parche")" -ne "$(wc -l < "$destino")" ]; then
+        echo "ABORTADO $destino: original $(wc -l < "$destino") lineas, parche $(wc -l < "$parche")"
+        continue
+    fi
+    if mount | grep -q " $destino "; then
+        echo "ya montado: $destino"
+        continue
+    fi
+    mount -o bind "$parche" "$destino" && echo "montado: $destino" && echo x >> /tmp/.teclas-nuevo
+done
+
+# Reiniciar el compositor solo si se monto algo nuevo en esta pasada.
+if [ -f /tmp/.teclas-nuevo ]; then
+    rm -f /tmp/.teclas-nuevo
+    (
+        sleep 2
+        if ! initctl restart surface-manager >/dev/null 2>&1; then
+            stop surface-manager >/dev/null 2>&1; sleep 2
+            start surface-manager >/dev/null 2>&1
+        fi
+        sleep 8
+        echo "compositor reiniciado, pid $(pgrep -x surface-manager)"
+    ) &
+else
+    echo "nada nuevo que montar: compositor intacto"
+fi

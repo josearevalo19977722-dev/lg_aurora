@@ -1,0 +1,5 @@
+# Los paquetes se compilan: ./instalar.sh los genera si no estan.
+*.ipk
+# Generado por tools/build-ipk.py
+src/modo.js
+.DS_Store

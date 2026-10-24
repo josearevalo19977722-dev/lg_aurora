@@ -1,0 +1,50 @@
+#!/bin/sh
+# Fuerza que el televisor entre en Aurora al encender.
+#
+# Sin esto webOS retoma la ultima entrada usada: si apagaste viendo el PS5,
+# al encender vuelves al PS5. El registro como entrada de TV (30-aurora-input)
+# solo consigue que Aurora SEA una entrada, no que sea la elegida.
+#
+# Hay que esperar: 20-teclas reinicia el compositor alrededor del segundo 49,
+# y cualquier app lanzada antes se va con el. Por eso no se lanza hasta pasado
+# el segundo 75 de arranque.
+#
+# DESACTIVAR sin borrar: crear /media/internal/aurora-no-arrancar
+# REVERTIR: borrar este archivo y reiniciar.
+
+LOG=/var/lib/webosbrew/aurora-arranque.log
+FRENO=/media/internal/aurora-no-arrancar
+exec >>"$LOG" 2>&1 </dev/null
+echo "=== $(date) ==="
+
+[ -e "$FRENO" ] && { echo "desactivado por $FRENO"; exit 0; }
+
+(
+    # Esperar al compositor REINICIADO, no a un reloj: lo delata que su
+    # hora de arranque sea posterior al segundo 40, porque el original
+    # arranca sobre el segundo 2. Luego, unos segundos para que este listo.
+    hz=$(getconf CLK_TCK 2>/dev/null || echo 100)
+    i=0
+    while [ $i -lt 90 ]; do
+        sm=$(pgrep -x surface-manager)
+        if [ -n "$sm" ]; then
+            nacio=$(( $(awk '{print $22}' /proc/$sm/stat 2>/dev/null || echo 0) / hz ))
+            [ "$nacio" -gt 40 ] && break
+        fi
+        sleep 1; i=$((i+1))
+    done
+    echo "compositor reiniciado detectado a los $(cut -d. -f1 /proc/uptime)s (nacio en $nacio)"
+    sleep 5
+    # Si ya estamos en Aurora, no hacer nada.
+    actual=$(luna-send -n 1 -f luna://com.webos.applicationManager/getForegroundAppInfo \
+             '{}' </dev/null 2>/dev/null | tr -d ' \n"' | sed 's/.*appId://; s/,.*//')
+    case "$actual" in
+        tv.aurora.*) echo "ya estaba en $actual a los $(cut -d. -f1 /proc/uptime)s"; exit 0 ;;
+    esac
+    luna-send -n 1 -f luna://com.webos.applicationManager/launch \
+        '{"id":"tv.aurora.home"}' </dev/null >/dev/null 2>&1
+    sleep 6
+    final=$(luna-send -n 1 -f luna://com.webos.applicationManager/getForegroundAppInfo \
+            '{}' </dev/null 2>/dev/null | tr -d ' \n"' | sed 's/.*appId://; s/,.*//')
+    echo "lanzada a los $(cut -d. -f1 /proc/uptime)s | venia de ${actual:-vacio} | ahora $final"
+) &

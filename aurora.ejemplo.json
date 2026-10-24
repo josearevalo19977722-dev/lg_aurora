@@ -1,0 +1,20 @@
+{
+  "_comentario": "Orden de la fila de Aurora. Lo que no aparezca aqui va al final.",
+  "orden": [
+    "youtube.leanback.v4",
+    "netflix",
+    "com.disney.disneyplus-prod",
+    "com.wbd.stream",
+    "amazon",
+    "tv.twitch.tv.starshot.lg",
+    "spotify-beehive",
+    "com.webos.app.livetv",
+    "com.webos.app.discovery",
+    "org.webosbrew.hbchannel"
+  ],
+  "ocultar": [
+    "com.webos.app.browser",
+    "tld.my.customlauncher"
+  ],
+  "_nota": "El modo lo decide el paquete instalado: tv.aurora.home (pantalla completa) o tv.aurora.bar (barra)."
+}
